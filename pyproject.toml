@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=64.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nih_cxr_ai"
+version = "0.1.0"
+description = "NIH Chest X-ray Classification with Deep Learning"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {file = "LICENSE"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"},
+]
+
+dependencies = [
+    "numpy",
+    "pandas",
+    "torch>=2.0.0",
+    "torchvision",
+    "pytorch-lightning",
+    "wandb",
+    "matplotlib",
+    "seaborn",
+    "scikit-learn",
+    "pillow",
+    "pyyaml",
+    "datasets",
+    "tqdm",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "black",
+    "flake8",
+    "mypy",
+    "pre-commit",
+    "jupyter",
+]
+
+[tool.setuptools]
+packages = ["nih_cxr_ai"]
+package-dir = {"" = "src"}

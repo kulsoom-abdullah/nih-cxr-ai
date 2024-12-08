@@ -1,0 +1,54 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+.env/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Lightning and other experiment logs, checkpoints
+wandb/
+checkpoints/
+logs/
+lightning_logs/
+
+# IDE & Editor settings
+.idea/
+.vscode/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Caches
+.mypy_cache/
+.pytest_cache/
+
+# Large data
+data/nih_chest_xray/images/
+data/nih_chest_xray_subset/images/
+tests/
+
+# Model weights
+*.pt
+*.pth
+*.ckpt
+
+# Data files
+*.csv
+*.h5
+*.npy
+
+# Environment
+requirements_current.txt
+requirements.txt

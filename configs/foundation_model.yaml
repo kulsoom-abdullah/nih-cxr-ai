@@ -1,0 +1,23 @@
+# configs/foundation_model.yaml
+model:
+  class_path: src.models.foundation.CXRFoundationModel
+  init_args:
+    model_type: "foundation"  # This will use 1024x1024
+    num_classes: 15
+    learning_rate: 1e-4
+    dropout_rate: 0.0
+data:
+  class_path: src.data.nih_dataset.NIHChestDataModule
+  init_args:
+    data_dir: data/nih_chest_xray
+    batch_size: 32
+    num_workers: 4
+    image_size: [1024, 1024]
+
+trainer:
+  max_epochs: 100
+  accelerator: auto
+  devices: auto
+  precision: 16
+  gradient_clip_val: 1.0
+  log_every_n_steps: 50
