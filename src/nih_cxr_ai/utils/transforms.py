@@ -1,53 +1,99 @@
 # src/nih_cxr_ai/utils/transforms.py
 """Image transformation utilities for chest X-rays.
 
-Provides consistent image transformations for training and validation,
-ensuring proper preprocessing of medical images while maintaining
-clinically relevant features.
+This module provides consistent image transformations for training and validation,
+ensuring proper preprocessing of medical images while maintaining clinically 
+relevant features.
 """
 
-# Standard library imports
-from typing import Tuple
+from typing import Tuple, Union
 
-# Third-party imports
-from torchvision import transforms
+import torch
+import torchvision.transforms as T
+from torchvision.transforms import InterpolationMode
 
-def get_train_transforms(image_size: Tuple[int, int] = (224, 224)):
-    """
-    Get training transforms for chest X-ray images.
+
+def get_train_transforms(
+    image_size: Tuple[int, int] = (224, 224), normalize: bool = True
+) -> T.Compose:
+    """Get training transforms for chest X-ray images.
+
+    Applies a sequence of augmentations suitable for medical imaging:
+    - Resize to target size
+    - Random horizontal flip (anatomically valid)
+    - Mild random rotation (±10 degrees)
+    - Optional normalization using ImageNet statistics
 
     Args:
-        image_size: Tuple of (height, width) for resizing images
+        image_size: Target (height, width) for resizing
+        normalize: Whether to apply normalization
 
     Returns:
-        transforms.Compose: Composition of image transformations
+        Composition of transforms
     """
-    return transforms.Compose(
+    transforms = [
+        T.Resize(image_size, interpolation=InterpolationMode.BILINEAR),
+        T.RandomHorizontalFlip(p=0.5),
+        # Conservative rotation to preserve anatomical validity
+        T.RandomRotation(degrees=10, interpolation=InterpolationMode.BILINEAR, fill=0),
+        T.ToTensor(),
+    ]
+
+    if normalize:
+        # ImageNet normalization - useful with pretrained models
+        transforms.append(
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        )
+
+    return T.Compose(transforms)
+
+
+def get_val_transforms(
+    image_size: Tuple[int, int] = (224, 224), normalize: bool = True
+) -> T.Compose:
+    """Get validation/test transforms for chest X-ray images.
+
+    Applies minimal transformations needed for evaluation:
+    - Resize to target size
+    - Optional normalization using ImageNet statistics
+
+    Args:
+        image_size: Target (height, width) for resizing
+        normalize: Whether to apply normalization
+
+    Returns:
+        Composition of transforms
+    """
+    transforms = [
+        T.Resize(image_size, interpolation=InterpolationMode.BILINEAR),
+        T.ToTensor(),
+    ]
+
+    if normalize:
+        transforms.append(
+            T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        )
+
+    return T.Compose(transforms)
+
+
+def get_gradient_visualization_transform(
+    image_size: Tuple[int, int] = (224, 224)
+) -> T.Compose:
+    """Get transforms for gradient visualization.
+
+    Similar to validation transforms but without normalization
+    to maintain interpretable pixel values for visualization.
+
+    Args:
+        image_size: Target (height, width) for resizing
+
+    Returns:
+        Composition of transforms
+    """
+    return T.Compose(
         [
-            transforms.Resize(image_size),
-            transforms.RandomHorizontalFlip(),
-            transforms.RandomAffine(
-                degrees=10, translate=(0.1, 0.1)
-            ),  # Reinstating this
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            T.Resize(image_size, interpolation=InterpolationMode.BILINEAR),
+            T.ToTensor(),
         ]
     )
-
-
-def get_val_transforms(image_size: Tuple[int, int] = (224, 224)):
-    """Get validation transforms for 1024x1024 input images."""
-    return transforms.Compose(
-        [
-            transforms.Resize(image_size),  # From 1024x1024 to target size
-            transforms.ToTensor(),
-            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        ]
-    )
-
-
-# Some medical imaging papers even suggest additional valid augmentations we could consider adding:
-
-# Slight brightness/contrast variations (to handle different X-ray exposure settings)
-# Minor scaling (to handle different chest sizes)
-# Gaussian noise (to simulate different imaging equipment qualities)

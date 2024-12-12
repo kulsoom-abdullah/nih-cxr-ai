@@ -1,25 +1,4 @@
-# configs/test_config.yaml
-data:
-  class_path: nih_cxr_ai.data.nih_dataset.NIHChestDataModule
-  init_args:
-    data_dir: data/nih_chest_xray
-    batch_size: 32
-    num_workers: 4
-    image_size: [224, 224]
-    train_val_test_split: [0.7, 0.15, 0.15]
-    # Add these for testing
-    subset_size: 1000  # Only use 1000 images total
-    debug: true       # Enable debug mode
-
-trainer:
-  max_epochs: 1
-  limit_train_batches: 0.1  # Use only 10% of training data
-  limit_val_batches: 0.1    # Use only 10% of validation data
-  limit_test_batches: 0.1   # Use only 10% of test data
-  # ... rest of your trainer config
-  
-
-# configs/traditional_model.yaml
+# configs/test_traditional_config.yaml
 model:
   class_path: nih_cxr_ai.models.traditional.TraditionalCXRModel
   init_args:
@@ -37,6 +16,11 @@ data:
 
 trainer:
   max_epochs: 1
+  limit_train_batches: 20  # Only use 20 batches for training
+  limit_val_batches: 10    # Only use 10 batches for validation
+  limit_test_batches: 10   # Only use 10 batches for testing
+  log_every_n_steps: 10  # More frequent logging for small datasets
+  accumulate_grad_batches: 4  # Accumulate gradients for larger effective batch size
   accelerator: auto
   devices: auto
   precision: 16

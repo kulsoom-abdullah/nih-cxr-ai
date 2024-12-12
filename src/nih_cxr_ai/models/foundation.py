@@ -5,13 +5,13 @@ This module implements the Google foundation model architecture for analyzing ch
 X-rays using modern deep learning techniques adapted from computer vision models.
 """
 
-from ..utils.transforms import get_train_transforms, get_val_transforms
-
 import torch
 import torch.nn as nn
 from transformers import AutoModel
 
+from ..utils.transforms import get_train_transforms, get_val_transforms
 from .base import ChestXrayBaseModel
+
 
 class CXRFoundationModel(ChestXrayBaseModel):
     """Model using CXR Foundation embeddings"""

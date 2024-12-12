@@ -12,6 +12,7 @@ from typing import Any, Dict, Tuple
 # Third-party imports
 import numpy as np
 
+
 @dataclass
 class ChestXrayAugParams:
     """Configuration parameters for chest X-ray augmentations"""
