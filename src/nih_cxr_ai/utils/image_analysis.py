@@ -16,6 +16,7 @@ import pandas as pd
 from PIL import Image
 from tqdm import tqdm
 
+
 def analyze_image_sizes(data_dir: str) -> Dict:
     """
     Analyzes image sizes in the dataset.

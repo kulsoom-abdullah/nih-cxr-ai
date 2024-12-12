@@ -7,7 +7,7 @@ __version__ = "0.1.0"
 __author__ = "Kulsoom Abdullah"
 
 
-from .models.traditional import TraditionalCXRModel
 from .data.nih_dataset import NIHChestDataModule
+from .models.traditional import TraditionalCXRModel
 
 __all__ = ["TraditionalCXRModel", "NIHChestDataModule"]

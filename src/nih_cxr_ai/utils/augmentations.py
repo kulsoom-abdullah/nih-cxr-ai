@@ -1,7 +1,7 @@
 # src/nih_cxr_ai/utils/augmentations.py
 """Data augmentation configurations for chest X-rays.
 
-Defines augmentation parameters and transformations suitable for 
+Defines augmentation parameters and transformations suitable for
 medical imaging, with careful consideration for preserving diagnostic features.
 """
 
@@ -9,8 +9,6 @@ medical imaging, with careful consideration for preserving diagnostic features.
 from dataclasses import dataclass
 from typing import Any, Dict, Tuple
 
-# Third-party imports
-import numpy as np
 
 @dataclass
 class ChestXrayAugParams:
