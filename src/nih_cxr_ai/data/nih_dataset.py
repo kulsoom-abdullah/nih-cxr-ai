@@ -9,7 +9,7 @@ configurable preprocessing, and weighted sampling for class imbalance.
 import logging
 import math
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import pandas as pd
 import pytorch_lightning as pl
@@ -34,14 +34,14 @@ class NIHChestDataset(Dataset):
     def __init__(
         self,
         data_dir: Union[str, Path],
-        csv_file: Union[str, Path],
+        data_source: Union[str, Path, pd.DataFrame],
         transform: Optional[transforms.Compose] = None,
     ) -> None:
         """Initialize NIH Chest X-ray dataset.
 
         Args:
             data_dir: Root directory containing the dataset
-            csv_file: Path to the CSV file containing image paths and labels
+            data_source: Either a path to CSV file or a pandas DataFrame w/image paths and labels
             transform: Optional transforms to be applied to images
 
         Raises:
@@ -51,75 +51,82 @@ class NIHChestDataset(Dataset):
         self.data_dir = Path(data_dir)
         self.transform = transform
 
+        # Validate data directory exists
         if not self.data_dir.exists():
             raise FileNotFoundError(f"Data directory not found: {data_dir}")
 
-        # Load and validate labels
+        # Load data from either DataFrame or CSV
         try:
-            self.df = pd.read_csv(csv_file)
+            if isinstance(data_source, (str, Path)):
+                self.df = pd.read_csv(data_source)
+            elif isinstance(data_source, pd.DataFrame):
+                self.df = data_source.copy()
+            else:
+                raise ValueError(
+                    "data_source must be either a path to CSV or a DataFrame"
+                )
+
+            # Validate required columns
             required_columns = {"image_file_path", "labels"}
             if not all(col in self.df.columns for col in required_columns):
-                raise ValueError(f"CSV must contain columns: {required_columns}")
-        except Exception as e:
-            raise ValueError(f"Error loading CSV file: {str(e)}")
+                raise ValueError(f"DataFrame must contain columns: {required_columns}")
 
-        # Convert string labels to multi-hot encoding if needed
+        except Exception as e:
+            raise ValueError(f"Error loading data: {str(e)}")
+
+        # Convert string labels to list if needed
         if isinstance(self.df["labels"].iloc[0], str):
             self.df["labels"] = self.df["labels"].apply(eval)
 
-        logger.info(f"Loaded {len(self.df)} samples from {csv_file}")
+        logger.info(f"Loaded {len(self.df)} samples")
 
     def __len__(self) -> int:
-        """Return number of samples in dataset."""
+        """Return the number of samples in the dataset.
+
+        This method is required by PyTorch's Dataset class and is used to
+        determine how many samples are available for training/validation.
+        """
         return len(self.df)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         """Get a single sample from the dataset.
 
+        This method is called by PyTorch's DataLoader to get each sample.
+        It loads the image, applies any transforms, and returns the image
+        tensor along with its labels in multi-hot encoding format.
+
         Args:
             idx: Index of the sample to get
 
         Returns:
-            Tuple containing (image_tensor, label_tensor)
-
-        Raises:
-            RuntimeError: If image loading or processing fails
+            Tuple containing:
+            - image_tensor: Transformed image tensor
+            - label_tensor: Multi-hot encoded labels tensor
         """
+        # Get image path and load image
+        img_path = self.data_dir / self.df.iloc[idx]["image_file_path"]
         try:
-            # Get image path
-            img_path = self.data_dir / self.df.iloc[idx]["image_file_path"]
-
-            # Load and convert image
             image = Image.open(img_path).convert("RGB")
-
-            # Apply transforms
-            if self.transform:
-                image = self.transform(image)
-
-            # Process labels
-            if isinstance(self.df.iloc[idx]["labels"], str):
-                labels = eval(self.df.iloc[idx]["labels"])
-            else:
-                labels = self.df.iloc[idx]["labels"]
-
-            # Create multi-hot encoding
-            label_tensor = torch.zeros(15, dtype=torch.long)
-            label_tensor[labels] = 1
-
-            return image, label_tensor
-
         except Exception as e:
-            raise RuntimeError(f"Error loading sample {idx}: {str(e)}")
+            raise RuntimeError(f"Error loading image {img_path}: {str(e)}")
 
-    def get_sample_weights(self) -> torch.Tensor:
-        """Calculate sample weights to handle class imbalance.
+        # Apply transforms if specified
+        if self.transform:
+            image = self.transform(image)
 
-        Returns:
-            torch.Tensor: Weights for each sample based on label frequencies
-        """
-        label_counts = self.df["labels"].value_counts()
-        weights = 1.0 / label_counts[self.df["labels"]]
-        return torch.FloatTensor(weights)
+        # Process labels - convert to multi-hot encoding
+        if isinstance(self.df.iloc[idx]["labels"], str):
+            labels = eval(self.df.iloc[idx]["labels"])
+        else:
+            labels = self.df.iloc[idx]["labels"]
+
+        # Filter out anything >= 14 if that happens to be "No Finding"
+        labels = [lbl for lbl in labels if lbl < 14]
+        # Create multi-hot encoding tensor
+        label_tensor = torch.zeros(14, dtype=torch.long)
+        label_tensor[labels] = 1
+
+        return image, label_tensor
 
 
 class NIHChestDataModule(pl.LightningDataModule):
@@ -131,31 +138,20 @@ class NIHChestDataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        data_dir: Union[str, Path] = "data/nih_chest_xray",
+        data_dir: Union[str, Path],
         batch_size: int = 32,
         num_workers: int = 4,
         image_size: Tuple[int, int] = (224, 224),
         train_val_test_split: Tuple[float, float, float] = (0.7, 0.15, 0.15),
+        subset_size: Optional[int] = None,
+        debug: bool = False,
     ) -> None:
-        """Initialize the DataModule.
-
-        Args:
-            data_dir: Root directory containing the dataset
-            batch_size: Number of samples per batch
-            num_workers: Number of workers for data loading
-            image_size: Target size for image transforms
-            train_val_test_split: Ratios for train/val/test split
-
-        Raises:
-            ValueError: If split ratios don't sum to 1.0 or are negative
-        """
+        """Initialize the DataModule."""
         super().__init__()
 
         # Validate split ratios
         if not math.isclose(sum(train_val_test_split), 1.0, rel_tol=1e-9):
             raise ValueError("Train/val/test split ratios must sum to 1.0")
-        if any(split < 0 for split in train_val_test_split):
-            raise ValueError("Split ratios cannot be negative")
 
         self.save_hyperparameters()
         self.data_dir = Path(data_dir)
@@ -163,107 +159,76 @@ class NIHChestDataModule(pl.LightningDataModule):
         self.num_workers = num_workers
         self.image_size = image_size
         self.split_ratios = train_val_test_split
+        self.subset_size = subset_size
+        self.debug = debug
 
-        # Initialize datasets to None
-        self.train_dataset: Optional[NIHChestDataset] = None
-        self.val_dataset: Optional[NIHChestDataset] = None
-        self.test_dataset: Optional[NIHChestDataset] = None
-
-    def prepare_data(self) -> None:
-        """Verify data exists and prepare if needed."""
-        if not self.data_dir.exists():
-            raise RuntimeError(f"Data directory {self.data_dir} does not exist")
-
-        required_files = ["labels.csv"]
-        missing_files = [f for f in required_files if not (self.data_dir / f).exists()]
-        if missing_files:
-            raise RuntimeError(
-                f"Missing required files in {self.data_dir}: {missing_files}"
-            )
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
 
     def setup(self, stage: Optional[str] = None) -> None:
-        """Set up train, validation and test datasets.
-
-        Args:
-            stage: Optional stage ('fit', 'validate', 'test', None)
-
-        Notes:
-            Creates and saves split CSVs if they don't exist
-        """
+        """Set up train, validation and test datasets."""
         # Load full dataset
-        df = pd.read_csv(self.data_dir / "labels.csv")
+        try:
+            full_df = pd.read_csv(self.data_dir / "labels.csv")
+        except Exception as e:
+            raise RuntimeError(f"Failed to load labels.csv: {str(e)}")
+
+        # Apply subset if specified
+        if self.subset_size is not None or self.debug:
+            subset_size = self.subset_size if self.subset_size else 1000
+            full_df = full_df.sample(n=min(subset_size, len(full_df)), random_state=42)
+            logger.info(f"Using subset of {len(full_df)} samples for testing/debugging")
 
         # Calculate split sizes
-        train_size = int(len(df) * self.split_ratios[0])
-        val_size = int(len(df) * self.split_ratios[1])
+        train_size = int(len(full_df) * self.split_ratios[0])
+        val_size = int(len(full_df) * self.split_ratios[1])
 
-        # Create splits
-        train_df = df[:train_size]
-        val_df = df[train_size : train_size + val_size]
-        test_df = df[train_size + val_size :]
-
-        # Save split CSVs
-        train_df.to_csv(self.data_dir / "train_labels.csv", index=False)
-        val_df.to_csv(self.data_dir / "val_labels.csv", index=False)
-        test_df.to_csv(self.data_dir / "test_labels.csv", index=False)
+        # Create splits using DataFrame indexing
+        df_shuffled = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        train_df = df_shuffled.iloc[:train_size]
+        val_df = df_shuffled.iloc[train_size : train_size + val_size]  # noqa: E203
+        test_df = df_shuffled.iloc[train_size + val_size :]  # noqa: E203
 
         if stage == "fit" or stage is None:
             self.train_dataset = NIHChestDataset(
-                self.data_dir,
-                self.data_dir / "train_labels.csv",
-                transform=get_train_transforms(self.image_size),
+                self.data_dir, train_df, transform=get_train_transforms(self.image_size)
             )
             self.val_dataset = NIHChestDataset(
-                self.data_dir,
-                self.data_dir / "val_labels.csv",
-                transform=get_val_transforms(self.image_size),
+                self.data_dir, val_df, transform=get_val_transforms(self.image_size)
             )
             logger.info(f"Train dataset size: {len(self.train_dataset)}")
             logger.info(f"Val dataset size: {len(self.val_dataset)}")
 
         if stage == "test" or stage is None:
             self.test_dataset = NIHChestDataset(
-                self.data_dir,
-                self.data_dir / "test_labels.csv",
-                transform=get_val_transforms(self.image_size),
+                self.data_dir, test_df, transform=get_val_transforms(self.image_size)
             )
             logger.info(f"Test dataset size: {len(self.test_dataset)}")
 
-    def train_dataloader(self) -> DataLoader:
-        """Create the training data loader."""
-        if self.train_dataset is None:
-            raise RuntimeError("Train dataset not initialized. Call setup() first")
-
+    def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            shuffle=True,
             num_workers=self.num_workers,
+            shuffle=True,
             pin_memory=True,
         )
 
-    def val_dataloader(self) -> DataLoader:
-        """Create the validation data loader."""
-        if self.val_dataset is None:
-            raise RuntimeError("Validation dataset not initialized. Call setup() first")
-
+    def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
-            shuffle=False,
             num_workers=self.num_workers,
+            shuffle=False,
             pin_memory=True,
         )
 
-    def test_dataloader(self) -> DataLoader:
-        """Create the test data loader."""
-        if self.test_dataset is None:
-            raise RuntimeError("Test dataset not initialized. Call setup() first")
-
+    def test_dataloader(self):
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
-            shuffle=False,
             num_workers=self.num_workers,
+            shuffle=False,
             pin_memory=True,
         )

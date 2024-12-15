@@ -23,8 +23,8 @@ trainer:
 model:
   class_path: nih_cxr_ai.models.traditional.TraditionalCXRModel
   init_args:
-    num_classes: 15
-    learning_rate: 0.0001
+    num_classes: 14  # Changed this to 14 to match the paper (only pathologies)
+    learning_rate: 0.0001  # They used 1e-4 in the paper
 
 data:
   class_path: nih_cxr_ai.data.nih_dataset.NIHChestDataModule
@@ -36,7 +36,7 @@ data:
     train_val_test_split: [0.7, 0.15, 0.15]
 
 trainer:
-  max_epochs: 1
+  max_epochs: 50  
   accelerator: auto
   devices: auto
   precision: 16

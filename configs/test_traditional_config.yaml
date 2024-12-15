@@ -1,10 +1,4 @@
 # configs/test_traditional_config.yaml
-model:
-  class_path: nih_cxr_ai.models.traditional.TraditionalCXRModel
-  init_args:
-    num_classes: 15
-    learning_rate: 0.0001
-
 data:
   class_path: nih_cxr_ai.data.nih_dataset.NIHChestDataModule
   init_args:
@@ -13,34 +7,32 @@ data:
     num_workers: 4
     image_size: [224, 224]
     train_val_test_split: [0.7, 0.15, 0.15]
+    subset_size: 1000  # Use 1000 images for testing
+    debug: true       # Enable debug mode
+
+model:
+  class_path: nih_cxr_ai.models.traditional.TraditionalCXRModel
+  init_args:
+    num_classes: 14
+    learning_rate: 1e-4
+    backbone: efficientnet_b1
+    test_mode: true
 
 trainer:
-  max_epochs: 1
-  limit_train_batches: 20  # Only use 20 batches for training
-  limit_val_batches: 10    # Only use 10 batches for validation
-  limit_test_batches: 10   # Only use 10 batches for testing
-  log_every_n_steps: 10  # More frequent logging for small datasets
-  accumulate_grad_batches: 4  # Accumulate gradients for larger effective batch size
+  max_epochs: 2
   accelerator: auto
-  devices: auto
-  precision: 16
+  devices: 1
+  precision: 32
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
         monitor: val_auroc
         mode: max
         filename: "{epoch}-{val_auroc:.3f}"
-        save_top_k: 3
+        save_top_k: 1
+        
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
         monitor: val_auroc
-        patience: 10
+        patience: 2
         mode: max
-    - class_path: pytorch_lightning.callbacks.LearningRateMonitor
-      init_args:
-        logging_interval: step
-  logger:
-    class_path: pytorch_lightning.loggers.WandbLogger
-    init_args:
-      project: chest-xray-comparison
-      log_model: true

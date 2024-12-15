@@ -1,196 +1,159 @@
-"""Traditional ResNet-based model for chest X-ray classification.
-
-This module implements a multi-label classification model for chest X-rays using 
-a ResNet50 backbone pre-trained on ImageNet. It includes:
-- Proper handling of multi-label classification metrics
-- Balanced loss functions for handling class imbalance
-- Comprehensive evaluation metrics appropriate for medical applications
-- Robust error handling and logging
-"""
-
-import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, Optional
 
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torchvision.models as models
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchmetrics import AUROC, F1Score, MetricCollection, Precision, Recall
-
-print(f"Loading model file from: {os.path.abspath(__file__)}")
 
 
 class TraditionalCXRModel(pl.LightningModule):
-    """ResNet50-based model for multi-label chest X-ray classification."""
+    """
+    CheXNet-style model for multi-label chest X-ray classification.
+    Based on EfficientNet architecture with custom classification head.
+    """
 
     def __init__(
         self,
-        num_classes: int = 15,
+        num_classes: int = 14,
         learning_rate: float = 1e-4,
-        dropout_rate: float = 0.0,
         class_weights: Optional[torch.Tensor] = None,
-    ) -> None:
+        backbone: str = "efficientnet_b1",
+        test_mode: bool = False,
+    ):
+        """Initialize model with specified backbone and training parameters.
+
+        Args:
+            num_classes: Number of disease classes to predict
+            learning_rate: Initial learning rate
+            class_weights: Optional tensor of class weights for loss function
+            backbone: Model architecture to use ('efficientnet_b1' by default)
+            test_mode: Whether to run in test mode with limited data
+        """
         super().__init__()
+        # Log the incoming learning rate value and its type
+        print(
+            f"Initializing model with learning rate: {learning_rate} (type: {type(learning_rate)})"
+        )
+
+        self.test_mode = test_mode
+        try:
+            self.learning_rate = float(learning_rate)
+            print(f"Converted learning rate to float: {self.learning_rate}")
+        except (TypeError, ValueError) as e:
+            raise ValueError(
+                f"Could not convert learning rate to float: {learning_rate}"
+            ) from e
+
         self.save_hyperparameters()
-
-        if num_classes <= 0:
-            raise ValueError("num_classes must be positive")
-        if learning_rate <= 0:
-            raise ValueError("learning_rate must be positive")
-        if not 0 <= dropout_rate <= 1:
-            raise ValueError("dropout_rate must be between 0 and 1")
-
         self.num_classes = num_classes
-        self.learning_rate = learning_rate
-        self.dropout_rate = dropout_rate
-        self.class_weights = class_weights
 
-        self.model = self._build_model()
-        self.criterion = self._setup_criterion()
+        # Load pretrained backbone
+        if backbone == "efficientnet_b1":
+            base_model = models.efficientnet_b1(weights="DEFAULT")
+            # Get the number of features from the classifier layer
+            num_features = base_model.classifier[1].in_features
+            # Remove the original classifier
+            self.feature_extractor = nn.Sequential(*list(base_model.children())[:-1])
+        else:
+            raise ValueError(f"Unsupported backbone: {backbone}")
 
-        self.train_metrics = self._setup_metrics("train")
-        self.val_metrics = self._setup_metrics("val")
-        self.test_metrics = self._setup_metrics("test")
-
-    def _build_model(self) -> nn.Module:
-        """Constructs ResNet50 model with custom final layer."""
-        model = models.resnet50(weights=models.ResNet50_Weights.IMAGENET1K_V1)
-        model.fc = nn.Sequential(
-            nn.Dropout(self.dropout_rate),
-            nn.Linear(model.fc.in_features, self.num_classes),
-        )
-        return model
-
-    def _setup_criterion(self) -> nn.Module:
-        """Configure loss function with optional class weighting."""
-        return (
-            nn.BCEWithLogitsLoss(pos_weight=self.class_weights)
-            if self.class_weights is not None
-            else nn.BCEWithLogitsLoss()
+        # Custom classifier head with dropout and batch normalization
+        self.classifier = nn.Sequential(
+            nn.Dropout(p=0.2),
+            nn.Linear(num_features, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(p=0.2),
+            nn.Linear(512, num_classes),
         )
 
-    def _setup_metrics(self, prefix: str) -> MetricCollection:
-        """Initialize evaluation metrics and move to correct device."""
-        metrics = MetricCollection(
+        # Loss function with class weights if provided
+        self.criterion = nn.BCEWithLogitsLoss(pos_weight=class_weights)
+
+        # Initialize metrics
+        self.train_metrics = self._create_metrics("train_")
+        self.val_metrics = self._create_metrics("val_")
+        self.test_metrics = self._create_metrics("test_")
+
+        # Per-class metrics for detailed performance tracking
+        self.per_class_auroc = nn.ModuleList(
+            [AUROC(task="binary") for _ in range(num_classes)]
+        )
+
+    def _create_metrics(self, prefix: str) -> MetricCollection:
+        """Create a collection of metrics for tracking model performance."""
+        return MetricCollection(
             {
-                "auroc": AUROC(
-                    task="multilabel", num_labels=self.num_classes, average="macro"
-                ),
-                "f1": F1Score(
-                    task="multilabel", num_labels=self.num_classes, average="macro"
-                ),
-                "precision": Precision(
-                    task="multilabel", num_labels=self.num_classes, average="macro"
-                ),
-                "recall": Recall(
-                    task="multilabel", num_labels=self.num_classes, average="macro"
-                ),
+                "auroc": AUROC(task="multilabel", num_labels=self.num_classes),
+                "f1": F1Score(task="multilabel", num_labels=self.num_classes),
+                "precision": Precision(task="multilabel", num_labels=self.num_classes),
+                "recall": Recall(task="multilabel", num_labels=self.num_classes),
             },
-            prefix=f"{prefix}_",
+            prefix=prefix,
         )
-
-        # Move metrics to same device as model parameters
-        if next(self.parameters()).is_cuda:
-            metrics.to("cuda")
-
-        return metrics
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass through ResNet model."""
-        return self.model(x)
+        """Forward pass through the network.
 
-    def _compute_step(
-        self,
-        batch: List[torch.Tensor],
-        metrics: MetricCollection,
-        prefix: str,
-        sync_dist: bool = False,
-    ) -> torch.Tensor:
-        """Compute forward pass and metrics for a single step."""
+        Args:
+            x: Input tensor of shape (batch_size, channels, height, width)
+
+        Returns:
+            Tensor of logits with shape (batch_size, num_classes)
+        """
+        features = self.feature_extractor(x)
+        # Flatten the features
+        features = features.flatten(start_dim=1)
+        return self.classifier(features)
+
+    def training_step(self, batch: Dict, batch_idx: int) -> torch.Tensor:
+        """Training step processing a single batch."""
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y.float())
 
+        # Calculate and log metrics
         probs = torch.sigmoid(y_hat)
-        metric_values = metrics(probs, y)
-
-        self.log(f"{prefix}_loss", loss, prog_bar=True, sync_dist=sync_dist)
-        self.log_dict(metric_values, prog_bar=True, sync_dist=sync_dist)
+        self.train_metrics(probs, y)
+        self.log("train_loss", loss, prog_bar=True)
+        self.log_dict(self.train_metrics, prog_bar=True)
 
         return loss
 
-    def training_step(self, batch: List[torch.Tensor], batch_idx: int) -> torch.Tensor:
-        """Execute training step with metrics logging."""
-        return self._compute_step(batch, self.train_metrics, "train")
-
-    def validation_step(
-        self, batch: List[torch.Tensor], batch_idx: int
-    ) -> torch.Tensor:
-        """Execute validation step with metrics logging."""
-        return self._compute_step(batch, self.val_metrics, "val", sync_dist=True)
-
-    def test_step(
-        self, batch: List[torch.Tensor], batch_idx: int
-    ) -> Dict[str, torch.Tensor]:
-        """Execute test step with metrics logging."""
+    def validation_step(self, batch: Dict, batch_idx: int) -> torch.Tensor:
+        """Validation step processing a single batch."""
         x, y = batch
         y_hat = self(x)
         loss = self.criterion(y_hat, y.float())
 
+        # Calculate metrics
         probs = torch.sigmoid(y_hat)
-        self.test_metrics(probs, y)
+        self.val_metrics(probs, y)
 
-        return {"loss": loss, "preds": probs, "targets": y}
+        # Calculate per-class performance
+        for i, metric in enumerate(self.per_class_auroc):
+            metric(probs[:, i], y[:, i])
 
-    def on_test_epoch_end(self) -> Dict[str, float]:
-        """Process and log test results."""
-        try:
-            metrics = self.test_metrics.compute()
-            results = {}
+        # Log metrics
+        self.log("val_loss", loss, prog_bar=True)
+        self.log_dict(self.val_metrics, prog_bar=True)
 
-            for metric_name in ["auroc", "f1", "precision", "recall"]:
-                key = f"test_{metric_name}"
-                if key in metrics:
-                    try:
-                        value = metrics[key]
-                        results[f"avg_{metric_name}"] = (
-                            value.item() if torch.is_tensor(value) else float(value)
-                        )
-                    except Exception as e:
-                        self.print(f"Error processing {metric_name}: {str(e)}")
-                        results[f"avg_{metric_name}"] = 0.0
+        return loss
 
-            self.print("\nTest Results:")
-            self.print("-" * 40)
-            for key, value in sorted(results.items()):
-                self.print(f"{key}: {value:.4f}")
-
-            if self.logger:
-                self.logger.log_metrics(results)
-
-            return results
-
-        except Exception as e:
-            self.print(f"Error computing metrics: {str(e)}")
-            return {
-                "avg_auroc": 0.0,
-                "avg_f1": 0.0,
-                "avg_precision": 0.0,
-                "avg_recall": 0.0,
-            }
-
-    def configure_optimizers(self) -> Dict[str, Any]:
+    def configure_optimizers(self):
         """Configure optimizer and learning rate scheduler."""
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            optimizer, mode="min", factor=0.1, patience=5, verbose=True
+        scheduler = ReduceLROnPlateau(
+            optimizer, mode="max", factor=0.1, patience=5, verbose=True
         )
+
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "val_loss",
+                "monitor": "val_auroc",
                 "interval": "epoch",
-                "frequency": 1,
             },
         }
