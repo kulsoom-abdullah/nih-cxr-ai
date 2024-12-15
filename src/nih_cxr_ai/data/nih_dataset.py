@@ -26,9 +26,9 @@ logger = logging.getLogger(__name__)
 class NIHChestDataset(Dataset):
     """Dataset class for NIH Chest X-ray dataset with multi-label support.
 
-    This class handles loading and preprocessing of chest X-ray images along with
-    their associated disease labels. It supports both training and validation/testing
-    transforms and properly handles multi-label classification.
+    Handles loading and preprocessing of chest X-ray images along with their
+    associated disease labels. Supports weighted sampling for handling class
+    imbalance and proper image transformations.
     """
 
     def __init__(
@@ -37,12 +37,16 @@ class NIHChestDataset(Dataset):
         data_source: Union[str, Path, pd.DataFrame],
         transform: Optional[transforms.Compose] = None,
     ) -> None:
-        """Initialize the dataset.
+        """Initialize NIH Chest X-ray dataset.
 
         Args:
             data_dir: Root directory containing the dataset
             data_source: Either a path to CSV file or a pandas DataFrame w/image paths and labels
             transform: Optional transforms to be applied to images
+
+        Raises:
+            FileNotFoundError: If data_dir or csv_file don't exist
+            ValueError: If CSV file is missing required columns
         """
         self.data_dir = Path(data_dir)
         self.transform = transform
@@ -126,7 +130,11 @@ class NIHChestDataset(Dataset):
 
 
 class NIHChestDataModule(pl.LightningDataModule):
-    """PyTorch Lightning DataModule for NIH Chest X-ray dataset."""
+    """PyTorch Lightning DataModule for NIH Chest X-ray dataset.
+
+    Handles data splitting, loading, and preprocessing for training,
+    validation, and testing phases.
+    """
 
     def __init__(
         self,
