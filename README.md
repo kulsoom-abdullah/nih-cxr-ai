@@ -45,19 +45,35 @@ pip install -e .
 
 ## Usage
 
-1. Prepare dataset:
-```python
-python -m nih_cxr_ai.data.prepare_dataset
-```
+
+## Data Preparation
+
+The NIH Chest X-ray dataset is large and not included directly in this repo. Instead, scripts download and prepare the data:
+
+1. **Download and Prepare Data:**
+   ```bash
+   python -m nih_cxr_ai.data.prepare_dataset
+
+This will:
+
+- Download `Data_Entry_2017_v2020.csv`,`train_val_list.txt`, and `test_list.txt` from Hugging Face.
+- Download and extract all image zip files, preserving original NIH filenames.
+- Merge metadata (age, gender, view position) into a final `labels.csv`.
+- Create `train_labels.csv`, `val_labels.csv`, and `test_labels.csv` splits.
+- The final `labels.csv` and splits will be located under `src/data/nih_chest_xray/`.
+
+# Explore dataset characteristics and distribution
+jupyter notebook notebooks/01_data_exploration.ipynb
+
+Note: The images are large and not stored in this repository. You must run the preparation step to obtain them. For reference, see the official [Hugging Face](https://huggingface.co/datasets/alkzar90/NIH-Chest-X-ray-dataset) repository for the dataset.
 
 2. Train model:
+With the data prepared, you can train a baseline model:
 ```python
 # For full training
 python -m nih_cxr_ai.train --config configs/traditional_model.yaml
-
-# For quick testing
-python -m nih_cxr_ai.train --config configs/test_traditional_config.yaml
 ```
+This trains a multi-label classification model using the prepared splits and logs metrics per disease. You can monitor training progress and metrics via Weights & Biases if configured.
 
 ## Project Structure
 
@@ -85,3 +101,10 @@ MIT License
 - NIH for the Chest X-ray dataset
 - Lightning AI team for PyTorch Lightning
 - Weights & Biases for experiment tracking
+
+## Next Steps
+- Integrate a foundation model and compare performance against the baseline.
+- Add subgroup analyses (age, gender, view) to results.
+- Log test evaluation metrics and possibly subgroup metrics to W&B.
+
+

@@ -7,7 +7,6 @@ configurable preprocessing, and weighted sampling for class imbalance.
 """
 
 import logging
-import math
 from pathlib import Path
 from typing import Optional, Tuple, Union
 
@@ -36,6 +35,7 @@ class NIHChestDataset(Dataset):
         data_dir: Union[str, Path],
         data_source: Union[str, Path, pd.DataFrame],
         transform: Optional[transforms.Compose] = None,
+        num_classes: int = 14,
     ) -> None:
         """Initialize NIH Chest X-ray dataset.
 
@@ -50,6 +50,7 @@ class NIHChestDataset(Dataset):
         """
         self.data_dir = Path(data_dir)
         self.transform = transform
+        self.num_classes = num_classes
 
         # Validate data directory exists
         if not self.data_dir.exists():
@@ -103,30 +104,33 @@ class NIHChestDataset(Dataset):
             - image_tensor: Transformed image tensor
             - label_tensor: Multi-hot encoded labels tensor
         """
-        # Get image path and load image
         img_path = self.data_dir / self.df.iloc[idx]["image_file_path"]
-        try:
-            image = Image.open(img_path).convert("RGB")
-        except Exception as e:
-            raise RuntimeError(f"Error loading image {img_path}: {str(e)}")
+        image = Image.open(img_path).convert("RGB")
 
-        # Apply transforms if specified
         if self.transform:
             image = self.transform(image)
 
-        # Process labels - convert to multi-hot encoding
-        if isinstance(self.df.iloc[idx]["labels"], str):
-            labels = eval(self.df.iloc[idx]["labels"])
-        else:
-            labels = self.df.iloc[idx]["labels"]
+        labels = self.df.iloc[idx]["labels"]
 
-        # Filter out anything >= 14 if that happens to be "No Finding"
-        labels = [lbl for lbl in labels if lbl < 14]
-        # Create multi-hot encoding tensor
-        label_tensor = torch.zeros(14, dtype=torch.long)
+        label_tensor = torch.zeros(self.num_classes, dtype=torch.long)
         label_tensor[labels] = 1
 
-        return image, label_tensor
+        # age = self.df.iloc[idx]["Patient Age"]  # might be string like "058Y", so parse if needed
+        # age = int(age.replace("Y",""))  # e.g., convert "058Y" to int(58)
+        # gender = self.df.iloc[idx]["Patient Gender"] # "M" or "F"
+        # position = self.df.iloc[idx]["View Position"] # "PA" or "AP" etc.
+
+        return image, label_tensor  # , age, gender, position
+
+        def get_sample_weights(self) -> torch.Tensor:
+            """Calculate sample weights to handle class imbalance.
+
+            Returns:
+                torch.Tensor: Weights for each sample based on label frequencies
+            """
+            label_counts = self.df["labels"].value_counts()
+            weights = 1.0 / label_counts[self.df["labels"]]
+            return torch.FloatTensor(weights)
 
 
 class NIHChestDataModule(pl.LightningDataModule):
@@ -138,97 +142,109 @@ class NIHChestDataModule(pl.LightningDataModule):
 
     def __init__(
         self,
-        data_dir: Union[str, Path],
+        data_dir: Union[str, Path] = "src/data/nih_chest_xray",
         batch_size: int = 32,
         num_workers: int = 4,
         image_size: Tuple[int, int] = (224, 224),
-        train_val_test_split: Tuple[float, float, float] = (0.7, 0.15, 0.15),
-        subset_size: Optional[int] = None,
-        debug: bool = False,
     ) -> None:
-        """Initialize the DataModule."""
+        """Initialize the DataModule.
+
+        Args:
+            data_dir: Root directory containing the dataset
+            batch_size: Number of samples per batch
+            num_workers: Number of workers for data loading
+            image_size: Target size for image transforms
+
+        Raises:
+            ValueError: If split ratios don't sum to 1.0 or are negative
+        """
         super().__init__()
-
-        # Validate split ratios
-        if not math.isclose(sum(train_val_test_split), 1.0, rel_tol=1e-9):
-            raise ValueError("Train/val/test split ratios must sum to 1.0")
-
-        self.save_hyperparameters()
         self.data_dir = Path(data_dir)
+        # print(f"DEBUG: data_dir set to {self.data_dir}")
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.image_size = image_size
-        self.split_ratios = train_val_test_split
-        self.subset_size = subset_size
-        self.debug = debug
 
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
 
+    def prepare_data(self) -> None:
+        """Verify data exists and prepare if needed."""
+        required_files = [
+            "labels.csv",
+            "train_labels.csv",
+            "val_labels.csv",
+            "test_labels.csv",
+        ]
+        for f in required_files:
+            if not (self.data_dir / f).exists():
+                raise RuntimeError(f"Missing required file: {f} in {self.data_dir}")
+
     def setup(self, stage: Optional[str] = None) -> None:
-        """Set up train, validation and test datasets."""
-        # Load full dataset
-        try:
-            full_df = pd.read_csv(self.data_dir / "labels.csv")
-        except Exception as e:
-            raise RuntimeError(f"Failed to load labels.csv: {str(e)}")
+        """Set up train, validation and test datasets.
 
-        # Apply subset if specified
-        if self.subset_size is not None or self.debug:
-            subset_size = self.subset_size if self.subset_size else 1000
-            full_df = full_df.sample(n=min(subset_size, len(full_df)), random_state=42)
-            logger.info(f"Using subset of {len(full_df)} samples for testing/debugging")
+        Args:
+            stage: Optional stage ('fit', 'validate', 'test', None)
 
-        # Calculate split sizes
-        train_size = int(len(full_df) * self.split_ratios[0])
-        val_size = int(len(full_df) * self.split_ratios[1])
-
-        # Create splits using DataFrame indexing
-        df_shuffled = full_df.sample(frac=1, random_state=42).reset_index(drop=True)
-        train_df = df_shuffled.iloc[:train_size]
-        val_df = df_shuffled.iloc[train_size : train_size + val_size]  # noqa: E203
-        test_df = df_shuffled.iloc[train_size + val_size :]  # noqa: E203
-
+        """
         if stage == "fit" or stage is None:
             self.train_dataset = NIHChestDataset(
-                self.data_dir, train_df, transform=get_train_transforms(self.image_size)
+                self.data_dir,
+                self.data_dir / "train_labels.csv",
+                transform=get_train_transforms(self.image_size),
             )
             self.val_dataset = NIHChestDataset(
-                self.data_dir, val_df, transform=get_val_transforms(self.image_size)
+                self.data_dir,
+                self.data_dir / "val_labels.csv",
+                transform=get_val_transforms(self.image_size),
             )
             logger.info(f"Train dataset size: {len(self.train_dataset)}")
             logger.info(f"Val dataset size: {len(self.val_dataset)}")
 
         if stage == "test" or stage is None:
             self.test_dataset = NIHChestDataset(
-                self.data_dir, test_df, transform=get_val_transforms(self.image_size)
+                self.data_dir,
+                self.data_dir / "test_labels.csv",
+                transform=get_val_transforms(self.image_size),
             )
             logger.info(f"Test dataset size: {len(self.test_dataset)}")
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """Create the training data loader."""
+        if self.train_dataset is None:
+            raise RuntimeError("Train dataset not initialized. Call setup() first")
+
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
             shuffle=True,
+            num_workers=self.num_workers,
             pin_memory=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """Create the validation data loader."""
+        if self.val_dataset is None:
+            raise RuntimeError("Validation dataset not initialized. Call setup() first")
+
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
             shuffle=False,
+            num_workers=self.num_workers,
             pin_memory=True,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
+        """Create the test data loader."""
+        if self.test_dataset is None:
+            raise RuntimeError("Test dataset not initialized. Call setup() first")
+
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
-            num_workers=self.num_workers,
             shuffle=False,
+            num_workers=self.num_workers,
             pin_memory=True,
         )

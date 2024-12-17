@@ -1,22 +1,19 @@
 # configs/test_traditional_config.yaml
-data:
-  class_path: nih_cxr_ai.data.nih_dataset.NIHChestDataModule
-  init_args:
-    data_dir: data/nih_chest_xray
-    batch_size: 32
-    num_workers: 4
-    image_size: [224, 224]
-    train_val_test_split: [0.7, 0.15, 0.15]
-    subset_size: 1000  # Use 1000 images for testing
-    debug: true       # Enable debug mode
-
 model:
   class_path: nih_cxr_ai.models.traditional.TraditionalCXRModel
   init_args:
     num_classes: 14
-    learning_rate: 1e-4
-    backbone: efficientnet_b1
-    test_mode: true
+    learning_rate: 0.0001
+    dropout_rate: 0.0
+
+
+data:
+  class_path: nih_cxr_ai.data.nih_dataset.NIHChestDataModule
+  init_args:
+    data_dir: src/data/nih_chest_xray
+    batch_size: 32
+    num_workers: 4
+    image_size: [224, 224]
 
 trainer:
   max_epochs: 2
@@ -26,13 +23,13 @@ trainer:
   callbacks:
     - class_path: pytorch_lightning.callbacks.ModelCheckpoint
       init_args:
-        monitor: val_auroc
+        monitor: val_auroc_mean
         mode: max
         filename: "{epoch}-{val_auroc:.3f}"
         save_top_k: 1
         
     - class_path: pytorch_lightning.callbacks.EarlyStopping
       init_args:
-        monitor: val_auroc
-        patience: 2
+        monitor: val_auroc_mean
+        patience: 10
         mode: max

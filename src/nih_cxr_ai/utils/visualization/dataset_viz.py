@@ -8,14 +8,13 @@ and correlations between different pathologies.
 from pathlib import Path
 
 # Standard library imports
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 # Third-party imports
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from PIL import Image
 
 
 class DatasetVisualizer:
@@ -356,7 +355,7 @@ class DatasetVisualizer:
                     labels = row[self.label_col]
 
                 # Convert numeric labels to disease names
-                disease_names = [self.LABEL_MAPPING[l] for l in labels]
+                disease_names = [self.LABEL_MAPPING[la] for la in labels]
                 # Wrap long titles
                 title = "\n".join(textwrap.wrap(", ".join(disease_names), 20))
                 ax.set_title(title, fontsize=8)
@@ -387,3 +386,93 @@ class DatasetVisualizer:
             plt.xticks(rotation=45)
             plt.tight_layout()
             plt.show()
+
+
+class MetadataVisualizer:
+    def __init__(
+        self, data_path: str, save_dir: str = "results/metadata_visualization"
+    ):
+        self.data_path = Path(data_path)
+        self.save_dir = Path(save_dir)
+        self.save_dir.mkdir(parents=True, exist_ok=True)
+        self.df = pd.read_csv(self.data_path)
+
+        # If Patient Age is in a format like '058Y', convert to int
+        if "Patient Age" in self.df.columns and self.df["Patient Age"].dtype == object:
+            self.df["Patient Age"] = self.df["Patient Age"].apply(
+                lambda x: int(x.replace("Y", ""))
+            )
+
+    def plot_age_distribution(self):
+        plt.figure(figsize=(10, 6))
+        sns.histplot(data=self.df, x="Patient Age", bins=20, kde=True, color="blue")
+        plt.title("Age Distribution of Patients")
+        plt.xlabel("Age")
+        plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig(self.save_dir / "age_distribution.png")
+        plt.close()
+
+    def plot_gender_distribution(self):
+        plt.figure(figsize=(6, 6))
+        sns.countplot(data=self.df, x="Patient Gender", palette="Set2")
+        plt.title("Gender Distribution")
+        plt.xlabel("Gender")
+        plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig(self.save_dir / "gender_distribution.png")
+        plt.close()
+
+    def plot_view_position_distribution(self):
+        plt.figure(figsize=(6, 6))
+        sns.countplot(data=self.df, x="View Position", palette="Set3")
+        plt.title("View Position Distribution")
+        plt.xlabel("View Position")
+        plt.ylabel("Count")
+        plt.tight_layout()
+        plt.savefig(self.save_dir / "view_position_distribution.png")
+        plt.close()
+
+    def plot_disease_prevalence(self, disease_names):
+        # Assuming 'labels' column is a list of disease indices
+        # We can count how often each disease index appears
+        disease_counts = {d_name: 0 for d_name in disease_names}
+
+        for label_list in self.df["labels"]:
+            for d_idx in label_list:
+                disease_counts[disease_names[d_idx]] += 1
+
+        # Convert to DataFrame for plotting
+        disease_df = pd.DataFrame(
+            list(disease_counts.items()), columns=["Disease", "Count"]
+        )
+
+        plt.figure(figsize=(12, 6))
+        sns.barplot(data=disease_df, x="Disease", y="Count", palette="mako")
+        plt.title("Disease Prevalence")
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        plt.savefig(self.save_dir / "disease_prevalence.png")
+        plt.close()
+
+    def plot_age_distribution_by_disease(self, disease_names):
+        # Example: For each disease, plot age distribution of patients having that disease
+        # This is more complex if you have multi-label per image. We can melt data.
+
+        # Create a DataFrame of one row per disease-label occurrence
+        # This might be large, but let's do a simple approach:
+        records = []
+        for _, row in self.df.iterrows():
+            age = row["Patient Age"]
+            for d_idx in row["labels"]:
+                d_name = disease_names[d_idx]
+                records.append({"Disease": d_name, "Age": age})
+        full_df = pd.DataFrame(records)
+
+        plt.figure(figsize=(12, 6))
+        sns.boxplot(data=full_df, x="Disease", y="Age", palette="vlag")
+        plt.title("Age Distribution by Disease")
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        plt.savefig(self.save_dir / "age_distribution_by_disease.png")
+        plt.close()

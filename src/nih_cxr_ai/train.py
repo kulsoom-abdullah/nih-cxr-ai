@@ -102,10 +102,10 @@ class ChestXRayTrainer:
 
         Returns:
             Dictionary with metric names and their float values:
-            - test_auroc: Area under ROC curve
-            - test_f1: F1 score
-            - test_precision: Precision score
-            - test_recall: Recall score
+            - test_auroc_mean: Area under ROC curve
+            - test_f1_mean: F1 score
+            - test_precision_mean: Precision score
+            - test_recall_mean: Recall score
         """
         model.to(self.device)
         model.eval()
@@ -133,11 +133,27 @@ class ChestXRayTrainer:
 
         # Compute metrics and convert to Python floats
         metrics = model.test_metrics(all_preds, all_labels)
+
+        disease_names = model.disease_names  # Ensure model.disease_names is accessible
+        auroc_values = metrics["auroc"]  # This is a tensor [num_classes]
+        f1_values = metrics["f1"]  # Also [num_classes]
+        precision_values = metrics["precision"]
+        recall_values = metrics["recall"]
+
+        # Print or log per-class results
+        for i, d_name in enumerate(disease_names):
+            print(
+                f"{d_name}: AUROC={auroc_values[i].item():.4f}, "
+                f"F1={f1_values[i].item():.4f}, "
+                f"Precision={precision_values[i].item():.4f}, "
+                f"Recall={recall_values[i].item():.4f}"
+            )
+
         return {
-            "test_auroc": metrics["test_auroc"].item(),
-            "test_f1": metrics["test_f1"].item(),
-            "test_precision": metrics["test_precision"].item(),
-            "test_recall": metrics["test_recall"].item(),
+            "test_auroc_mean": metrics["test_auroc_mean"].item(),
+            "test_f1_mean": metrics["test_f1_mean"].item(),
+            "test_precision_mean": metrics["test_precision_mean"].item(),
+            "test_recall_mean": metrics["test_recall_mean"].item(),
         }
 
     def train(self) -> str:
@@ -152,6 +168,10 @@ class ChestXRayTrainer:
 
             trainer = self._setup_trainer()
             logger.info("Starting model training...")
+
+            # After instantiating datamodule
+            print(f"DEBUG: DataModule data_dir is {datamodule.data_dir}")
+
             trainer.fit(model, datamodule)
 
             logger.info("Training completed. Running evaluation...")

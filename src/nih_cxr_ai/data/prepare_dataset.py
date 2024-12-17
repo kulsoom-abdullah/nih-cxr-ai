@@ -8,182 +8,182 @@ including creating proper train/validation/test splits and generating statistics
 # Standard library imports
 import logging
 import os
-import time
+import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 # Third-party imports
 import numpy as np
 import pandas as pd
-from datasets import load_dataset
-from tqdm.auto import tqdm
+
+# from datasets import load_dataset
+from huggingface_hub import hf_hub_download
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-def prepare_nih_dataset(
-    output_dir: str, full_dataset: bool = True, subset_size: Optional[int] = None
-) -> Dict:
+def download_if_needed(
+    repo_id: str, filename: str, output_dir: Path, overwrite: bool
+) -> str:
+    """Download file from Hugging Face Hub if not present or overwrite is True."""
+    local_path = output_dir / filename
+    if local_path.exists() and not overwrite:
+        logger.info(f"File {filename} already exists. Skipping download.")
+        return str(local_path)
+    logger.info(f"Downloading {filename}...")
+    return hf_hub_download(
+        repo_id=repo_id,
+        filename=filename,
+        local_dir=str(output_dir),
+        local_dir_use_symlinks=False,
+        repo_type="dataset",
+    )
+
+
+def prepare_nih_dataset_from_hf(output_dir: str, overwrite: bool = False) -> Dict:
     """
-    Prepare NIH dataset, either full or subset, with complete statistics.
+    Prepare NIH dataset from Hugging Face by downloading original files, extracting them,
+    creating splits, and merging metadata.
 
     Args:
         output_dir: Directory to save the dataset
-        full_dataset: Whether to process the full dataset
-        subset_size: Number of images for subset if full_dataset is False
-
-    Returns:
-        Dict containing preparation and dataset statistics
+        overwrite: If True, re-download files even if they exist.
     """
-    # Create output directories
     output_dir = Path(output_dir)
     images_dir = output_dir / "images"
     stats_dir = output_dir / "statistics"
+    os.makedirs(output_dir, exist_ok=True)
     os.makedirs(images_dir, exist_ok=True)
     os.makedirs(stats_dir, exist_ok=True)
 
-    stats = {
-        "dataset_info": {
-            "total_available": 0,
-            "processed_images": 0,
-            "errors": [],
-            "class_distribution": {},
-            "multi_label_stats": {},
-            "image_stats": {},
-        },
-        "splits": {},
-    }
+    print(f"Created directories:\n{output_dir}\n{images_dir}\n{stats_dir}\n")
 
-    try:
-        # Load full dataset first for statistics
-        logger.info("Loading dataset from Hugging Face...")
-        start_time = time.time()
+    repo_id = "alkzar90/NIH-Chest-X-ray-dataset"
 
-        dataset = load_dataset(
-            "alkzar90/NIH-Chest-X-ray-dataset",
-            "image-classification",
-            split="train",
-            trust_remote_code=True,
-        )
+    # These files exist under 'data'
+    metadata_file = os.path.join(output_dir, "Data_Entry_2017_v2020.csv")
+    train_val_list_file = os.path.join(output_dir, "train_val_list.txt")
+    test_list_file = os.path.join(output_dir, "test_list.txt")
 
-        stats["dataset_info"]["total_available"] = len(dataset)
-        logger.info(f"Total available samples: {len(dataset)}")
+    # Image archives under 'data/images/'
+    image_archives = [f"data/images/images_{i:03d}.zip" for i in range(1, 13)]
 
-        # Calculate full dataset statistics first
-        logger.info("Calculating dataset statistics...")
-        all_labels = []
-        label_combinations = []
-        for example in tqdm(dataset, desc="Analyzing labels"):
-            all_labels.extend(example["labels"])
-            label_combinations.append(tuple(sorted(example["labels"])))
+    logger.info("Downloading metadata and split files if needed...")
+    data_entry_path = download_if_needed(repo_id, metadata_file, output_dir, overwrite)
+    train_val_list_path = download_if_needed(
+        repo_id, train_val_list_file, output_dir, overwrite
+    )
+    test_list_path = download_if_needed(repo_id, test_list_file, output_dir, overwrite)
 
-        # Store full dataset statistics
-        stats["dataset_info"]["class_distribution"] = (
-            pd.Series(all_labels).value_counts().to_dict()
-        )
-        stats["dataset_info"]["multi_label_stats"] = {
-            "avg_labels_per_image": np.mean(
-                [len(labels) for labels in dataset["labels"]]
-            ),
-            "max_labels_per_image": max(len(labels) for labels in dataset["labels"]),
-            "common_combinations": pd.Series(label_combinations)
-            .value_counts()
-            .head(10)
-            .to_dict(),
-        }
+    logger.info("Checking image zip files...")
+    archive_paths = []
+    for arch in image_archives:
+        arch_path = download_if_needed(repo_id, arch, output_dir, overwrite)
+        archive_paths.append(arch_path)
 
-        # Save full statistics
-        pd.DataFrame(
-            {
-                "class": list(stats["dataset_info"]["class_distribution"].keys()),
-                "count": list(stats["dataset_info"]["class_distribution"].values()),
-            }
-        ).to_csv(stats_dir / "class_distribution.csv", index=False)
-
-        # Determine processing size
-        process_size = (
-            len(dataset) if full_dataset else min(subset_size or 1000, len(dataset))
-        )
-        logger.info(f"Processing {process_size} images...")
-
-        # Process images
-        processing_subset = dataset.select(range(process_size))
-        labels_data = []
-
-        for idx in tqdm(range(len(processing_subset)), desc="Processing images"):
-            try:
-                example = processing_subset[idx]
-                image_filename = f"image_{idx:06d}.png"
-                image_path = images_dir / image_filename
-
-                # Save image
-                example["image"].save(image_path)
-
-                # Store label information
-                labels_data.append(
-                    {
-                        "image_file_path": f"images/{image_filename}",
-                        "labels": str(example["labels"]),
-                    }
-                )
-
-                stats["dataset_info"]["processed_images"] += 1
-
-            except Exception as e:
-                error_msg = f"Error processing image {idx}: {str(e)}"
-                logger.error(error_msg)
-                stats["dataset_info"]["errors"].append(error_msg)
-                continue
-
-        # Create and save splits
-        labels_df = pd.DataFrame(labels_data)
-
-        # Create stratified splits to maintain label distribution
-        train_size = int(0.7 * len(labels_df))
-        val_size = int(0.15 * len(labels_df))
-
-        # Shuffle with fixed seed for reproducibility
-        shuffled_df = labels_df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-        train_df = shuffled_df[:train_size]
-        val_df = shuffled_df[train_size : train_size + val_size]
-        test_df = shuffled_df[train_size + val_size :]
-
-        # Save splits
-        splits = {"train": train_df, "val": val_df, "test": test_df}
-
-        for split_name, split_df in splits.items():
-            split_df.to_csv(output_dir / f"{split_name}_labels.csv", index=False)
-            stats["splits"][split_name] = len(split_df)
-
-        # Save full labels
-        labels_df.to_csv(output_dir / "labels.csv", index=False)
-
-        # Save complete statistics
-        pd.to_pickle(stats, stats_dir / "dataset_stats.pkl")
-
-        logger.info("\nDataset preparation completed!")
+    if any(images_dir.iterdir()) and not overwrite:
         logger.info(
-            f"Total processed: {stats['dataset_info']['processed_images']} images"
+            "Images dir not empty. Assuming images are already extracted. Skipping extraction."
         )
-        logger.info(f"Splits: {stats['splits']}")
+    else:
+        logger.info("Extracting images from zip files...")
+        for arch_path in archive_paths:
+            logger.info(f"Extracting {arch_path}...")
+            shutil.unpack_archive(str(arch_path), extract_dir=str(output_dir))
+            logger.info(f"Extraction of {arch_path} completed.")
+            os.remove(arch_path)
+            logger.info(f"Deleted archive {arch_path} after extraction.")
 
-    except Exception as e:
-        logger.error(f"Error preparing dataset: {str(e)}")
-        raise
+    # Load splits
+    with open(test_list_path, "r") as f:
+        test_files = set(line.strip() for line in f if line.strip())
+    with open(train_val_list_path, "r") as f:
+        train_val_files = set(line.strip() for line in f if line.strip())
+
+    all_images = list(images_dir.glob("*.png"))
+    all_filenames = [img.name for img in all_images]
+
+    train_val_df = pd.DataFrame(
+        {"Image Index": [f for f in all_filenames if f in train_val_files]}
+    )
+    test_df = pd.DataFrame(
+        {"Image Index": [f for f in all_filenames if f in test_files]}
+    )
+
+    np.random.seed(2137)
+    shuffled_train_val = train_val_df.sample(frac=1, random_state=2137).reset_index(
+        drop=True
+    )
+    train_size = int(0.8 * len(shuffled_train_val))
+    train_df = shuffled_train_val[:train_size]
+    val_df = shuffled_train_val[train_size:]
+
+    labels_df = pd.read_csv(
+        f"{output_dir}/labels.csv"
+    )  # This has image_file_path, labels, etc.
+
+    labels_df["Image Index"] = labels_df["image_file_path"].apply(
+        lambda x: x.replace("images/", "")
+    )
+
+    train_merged = pd.merge(train_df, labels_df, on="Image Index", how="left")
+    val_merged = pd.merge(val_df, labels_df, on="Image Index", how="left")
+    test_merged = pd.merge(test_df, labels_df, on="Image Index", how="left")
+
+    # Now train_merged, val_merged, test_merged have the required columns
+    train_merged.to_csv(f"{output_dir}/train_labels.csv", index=False)
+    val_merged.to_csv(f"{output_dir}/val_labels.csv", index=False)
+    test_merged.to_csv(f"{output_dir}/test_labels.csv", index=False)
+
+    # Merge metadata
+    entry_df = pd.read_csv(data_entry_path)
+    disease_names = [
+        "Atelectasis",
+        "Cardiomegaly",
+        "Effusion",
+        "Infiltration",
+        "Mass",
+        "Nodule",
+        "Pneumonia",
+        "Pneumothorax",
+        "Consolidation",
+        "Edema",
+        "Emphysema",
+        "Fibrosis",
+        "Pleural_Thickening",
+        "Hernia",
+    ]
+
+    def parse_labels(label_str):
+        if label_str == "No Finding":
+            return []
+        diseases = label_str.split("|")
+        indices = []
+        for d in diseases:
+            if d in disease_names:
+                indices.append(disease_names.index(d))
+        return indices
+
+    entry_df["labels"] = entry_df["Finding Labels"].apply(parse_labels)
+    entry_df["image_file_path"] = "images/" + entry_df["Image Index"]
+
+    merged_labels = entry_df[
+        ["image_file_path", "labels", "Patient Age", "Patient Gender", "View Position"]
+    ]
+    merged_labels.to_csv(output_dir / "labels.csv", index=False)
+    logger.info("Final labels.csv with metadata saved!")
+
+    stats = {
+        "splits": {"train": len(train_df), "val": len(val_df), "test": len(test_df)}
+    }
 
     return stats
 
 
 if __name__ == "__main__":
     try:
-        # Process full dataset
-        stats = prepare_nih_dataset(
-            "src/data/nih_chest_xray",  # New directory for full dataset
-            full_dataset=True,
-        )
+        stats = prepare_nih_dataset_from_hf("src/data/nih_chest_xray", overwrite=False)
         logger.info("Full dataset preparation completed successfully!")
-
     except Exception as e:
         logger.error(f"Dataset preparation failed with error: {str(e)}")
