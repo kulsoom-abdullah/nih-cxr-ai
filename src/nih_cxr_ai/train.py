@@ -149,11 +149,16 @@ class ChestXRayTrainer:
                 f"Recall={recall_values[i].item():.4f}"
             )
 
+        test_auroc_mean = auroc_values.mean().item()
+        test_f1_mean = f1_values.mean().item()
+        test_precision_mean = precision_values.mean().item()
+        test_recall_mean = recall_values.mean().item()
+
         return {
-            "test_auroc_mean": metrics["test_auroc_mean"].item(),
-            "test_f1_mean": metrics["test_f1_mean"].item(),
-            "test_precision_mean": metrics["test_precision_mean"].item(),
-            "test_recall_mean": metrics["test_recall_mean"].item(),
+            "test_auroc_mean": test_auroc_mean,
+            "test_f1_mean": test_f1_mean,
+            "test_precision_mean": test_precision_mean,
+            "test_recall_mean": test_recall_mean,
         }
 
     def train(self) -> str:
