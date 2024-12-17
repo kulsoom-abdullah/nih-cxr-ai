@@ -8,7 +8,7 @@ and image characteristics like intensity distributions.
 from pathlib import Path
 
 # Standard library imports
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Optional, Union
 
 # Third-party imports
 import matplotlib.pyplot as plt
@@ -97,7 +97,7 @@ class ImageVisualizer:
 
         Args:
             sample_size: Number of random images to sample for analysis.
-                        Warning: A large sample_size (e.g., 1000+) combined with high-resolution images
+                        Warning: A large sample_size (e.g., 1000+) combined with high-res images
                         can be resource-intensive. This may result in long processing times,
                         excessive memory usage, or even kernel instability, especially if running
                         on limited hardware.

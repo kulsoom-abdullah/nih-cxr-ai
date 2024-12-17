@@ -8,7 +8,7 @@ intensity statistics, and quality metrics specific to medical imaging.
 # Standard library imports
 from collections import Counter
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict
 
 # Third-party imports
 import numpy as np
