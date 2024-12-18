@@ -27,9 +27,11 @@ def download_if_needed(
     repo_id: str, filename: str, output_dir: Path, overwrite: bool
 ) -> str:
     """Download file from Hugging Face Hub if not present or overwrite is True."""
-    local_path = output_dir / filename
+    local_path = (
+        output_dir / Path(filename).name
+    )  # Extract just the filename part to save locally
     if local_path.exists() and not overwrite:
-        logger.info(f"File {filename} already exists. Skipping download.")
+        logger.info(f"File {local_path.name} already exists. Skipping download.")
         return str(local_path)
     logger.info(f"Downloading {filename}...")
     return hf_hub_download(
@@ -61,20 +63,22 @@ def prepare_nih_dataset_from_hf(output_dir: str, overwrite: bool = False) -> Dic
 
     repo_id = "alkzar90/NIH-Chest-X-ray-dataset"
 
-    # These files exist under 'data'
-    metadata_file = os.path.join(output_dir, "Data_Entry_2017_v2020.csv")
-    train_val_list_file = os.path.join(output_dir, "train_val_list.txt")
-    test_list_file = os.path.join(output_dir, "test_list.txt")
-
-    # Image archives under 'data/images/'
+    # Correct remote filenames as per Hugging Face repo structure
+    remote_metadata_file = "data/Data_Entry_2017_v2020.csv"
+    remote_train_val_list = "data/train_val_list.txt"
+    remote_test_list = "data/test_list.txt"
     image_archives = [f"data/images/images_{i:03d}.zip" for i in range(1, 13)]
 
     logger.info("Downloading metadata and split files if needed...")
-    data_entry_path = download_if_needed(repo_id, metadata_file, output_dir, overwrite)
-    train_val_list_path = download_if_needed(
-        repo_id, train_val_list_file, output_dir, overwrite
+    data_entry_path = download_if_needed(
+        repo_id, remote_metadata_file, output_dir, overwrite
     )
-    test_list_path = download_if_needed(repo_id, test_list_file, output_dir, overwrite)
+    train_val_list_path = download_if_needed(
+        repo_id, remote_train_val_list, output_dir, overwrite
+    )
+    test_list_path = download_if_needed(
+        repo_id, remote_test_list, output_dir, overwrite
+    )
 
     logger.info("Checking image zip files...")
     archive_paths = []
@@ -135,6 +139,32 @@ def prepare_nih_dataset_from_hf(output_dir: str, overwrite: bool = False) -> Dic
     train_merged.to_csv(f"{output_dir}/train_labels.csv", index=False)
     val_merged.to_csv(f"{output_dir}/val_labels.csv", index=False)
     test_merged.to_csv(f"{output_dir}/test_labels.csv", index=False)
+
+    # Create directories for subsets
+    train_dir = images_dir / "train"
+    val_dir = images_dir / "val"
+    test_dir = images_dir / "test"
+    train_dir.mkdir(exist_ok=True)
+    val_dir.mkdir(exist_ok=True)
+    test_dir.mkdir(exist_ok=True)
+
+    # Function to copy images to their respective directory
+    def copy_images(df: pd.DataFrame, subset_dir: Path):
+        for img_name in df["Image Index"]:
+            src = images_dir / img_name
+            dest = subset_dir / img_name
+            if not src.exists():
+                # If an image is missing, raise an error or handle gracefully
+                raise FileNotFoundError(f"Image {src} not found.")
+            shutil.copy(src, dest)
+
+    # Copy images for each subset
+    copy_images(train_df, train_dir)
+    copy_images(val_df, val_dir)
+    copy_images(test_df, test_dir)
+
+    for f in images_dir.glob("*.png"):
+        f.unlink()  # remove original image
 
     # Merge metadata
     entry_df = pd.read_csv(data_entry_path)

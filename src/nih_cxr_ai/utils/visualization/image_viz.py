@@ -8,7 +8,7 @@ and image characteristics like intensity distributions.
 from pathlib import Path
 
 # Standard library imports
-from typing import Optional, Union
+from typing import List, Optional, Union
 
 # Third-party imports
 import matplotlib.pyplot as plt
@@ -84,6 +84,8 @@ class ImageVisualizer:
             for j, (_, row) in enumerate(samples.iterrows()):
                 plt.subplot(num_rows, num_cols, idx + 1)
                 img = self.load_image(row["image_file_path"])
+                # image = np.clip(image, 0, 1)
+                img = np.clip(np.array(img), 0, 1)
                 plt.imshow(img, cmap="gray")
                 plt.title(f"{label_name}", fontsize=8)
                 plt.axis("off")
@@ -136,9 +138,10 @@ class ImageVisualizer:
         image: torch.Tensor,
         true_labels: np.ndarray,
         pred_probs: np.ndarray,
+        disease_names: List[str],
         save_name: Optional[str] = None,
     ) -> None:
-        """Display model predictions for a single image.
+        """Display model predictions for a single image with disease names as x-axis ticks.
 
         A simplified visualization showing the image and a bar chart comparing
         true labels with predicted probabilities.
@@ -149,44 +152,43 @@ class ImageVisualizer:
             pred_probs: Model's predicted probabilities
             save_name: Optional filename for saving the visualization
         """
-        # Ensure save directory exists
         if save_name:
             self.save_dir.mkdir(parents=True, exist_ok=True)
 
-        # Convert image tensor to numpy array for display
-        if torch.is_tensor(image):
-            image = image.cpu().numpy()
-            if image.shape[0] in (1, 3):  # Handle CHW format
-                image = image.transpose(1, 2, 0)
-            if image.shape[-1] == 1:  # Handle single channel
-                image = image.squeeze(-1)
+        # Convert image tensor to numpy
+        image = image.cpu().numpy()
+        if image.shape[0] in (1, 3):  # CHW -> HWC
+            image = image.transpose(1, 2, 0)
+        if image.shape[-1] == 1:
+            image = image.squeeze(-1)
 
-        # Create figure
         plt.figure(figsize=(10, 4))
         plt.subplot(1, 2, 1)
+        image = np.clip(image, 0, 1)  # Ensure values are in [0,1]
         plt.imshow(image, cmap="gray")
         plt.title("X-ray Image")
         plt.axis("off")
 
-        # Create simple bar plot of predictions
+        # Create bar plot of predictions and true labels
         plt.subplot(1, 2, 2)
+        x = np.arange(len(disease_names))
+        width = 0.4
         plt.bar(
-            range(len(true_labels)), true_labels, alpha=0.5, label="True", color="blue"
+            x - width / 2, true_labels, width, label="True", color="blue", alpha=0.5
         )
         plt.bar(
-            range(len(pred_probs)),
-            pred_probs,
-            alpha=0.5,
-            label="Predicted",
-            color="red",
+            x + width / 2, pred_probs, width, label="Predicted", color="red", alpha=0.5
         )
         plt.title("Predictions vs Ground Truth")
+        plt.xlabel("Disease")
+        plt.ylabel("Probability")
         plt.legend()
-        plt.xticks(rotation=45, ha="right")
+
+        # Set disease names as x ticks
+        plt.xticks(x, disease_names, rotation=45, ha="right")
 
         plt.tight_layout()
 
-        # Save or display
         if save_name:
             plt.savefig(self.save_dir / f"{save_name}.png", bbox_inches="tight")
             plt.close()

@@ -61,6 +61,7 @@ This will:
 - Merge metadata (age, gender, view position) into a final `labels.csv`.
 - Create `train_labels.csv`, `val_labels.csv`, and `test_labels.csv` splits.
 - The final `labels.csv` and splits will be located under `src/data/nih_chest_xray/`.
+- Organizes images into `train/`, `val/`, and `test/` directories.
 
 # Explore dataset characteristics and distribution
 jupyter notebook notebooks/01_data_exploration.ipynb
@@ -74,6 +75,52 @@ With the data prepared, you can train a baseline model:
 python -m nih_cxr_ai.train --config configs/traditional_model.yaml
 ```
 This trains a multi-label classification model using the prepared splits and logs metrics per disease. You can monitor training progress and metrics via Weights & Biases if configured.
+
+## Inference and Saving Predictions
+
+To run inference on your trained model and save predictions to a CSV for further analysis:
+
+```bash
+python -m nih_cxr_ai.inference \
+  --checkpoint path/to/checkpoint.ckpt \
+  --image_path src/data/nih_chest_xray/images/test \
+  --label_csv src/data/nih_chest_xray/test_labels.csv \
+  --output_csv test_predictions.csv
+```
+This will:
+
+- Load the model from `checkpoint.ckpt.`
+- Ingest images from `src/data/nih_chest_xray/images/test`.
+- Compare predictions against ground truth from `test_labels.csv `(if matches are found).
+- Save per-image predictions and ground truth to `predictions.csv`.
+
+If you prefer no visualization images:
+
+```bash
+python -m nih_cxr_ai.inference \
+  --checkpoint path/to/checkpoint.ckpt \
+  --image_path src/data/nih_chest_xray/images/test \
+  --label_csv src/data/nih_chest_xray/test_labels.csv \
+  --output_csv test_predictions.csv \
+  --no-visualize
+```
+If you also want less console output:
+
+```bash
+python -m nih_cxr_ai.inference \
+  --checkpoint path/to/checkpoint.ckpt \
+  --image_path src/data/nih_chest_xray/images/test \
+  --label_csv src/data/nih_chest_xray/test_labels.csv \
+  --output_csv test_predictions.csv \
+  --no-visualize \
+  --quiet
+```
+  
+After you generate predictions.csv, you can use the notebooks/subgroup_analysis.ipynb to load these predictions and compute metrics by subgroups (age, gender, view position), or any other analysis you'd like.
+
+
+## Baseline Results Summary
+Traditional model achieves AUROCs ranging from ~0.69 (Pneumothorax) to ~0.89 (Cardiomegaly) on the test set, providing a robust baseline for future comparison with foundation models.
 
 ## Project Structure
 
@@ -104,7 +151,4 @@ MIT License
 
 ## Next Steps
 - Integrate a foundation model and compare performance against the baseline.
-- Add subgroup analyses (age, gender, view) to results.
-- Log test evaluation metrics and possibly subgroup metrics to W&B.
-
-
+- Add subgroup analyses (age, gender, view) and integrate results into W&B. Evaluate improvement in these subgroups when switching to a foundation model.
