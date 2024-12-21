@@ -1,4 +1,4 @@
-# src/config.py# Not sure if this file is used.. I think the yaml files are instead.?
+# src/config.py
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -33,9 +33,7 @@ class ModelConfig:
             ValueError: If unknown model type is provided
         """
         if model_type == ModelType.TRADITIONAL.value:
-            return cls(
-                type=ModelType.TRADITIONAL, image_size=(224, 224)  # ResNet default
-            )
+            return cls(type=ModelType.TRADITIONAL, image_size=(224, 224))
         elif model_type == ModelType.FOUNDATION.value:
             return cls(
                 type=ModelType.FOUNDATION,

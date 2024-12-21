@@ -18,7 +18,7 @@ import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from .utils.visualization.image_viz import ImageVisualizer
+# from .utils.visualization.image_viz import ImageVisualizer
 from .utils.visualization.performance_viz import PerformanceVisualizer
 
 # Configure logging with a more informative format
@@ -46,7 +46,7 @@ class ChestXRayTrainer:
         self.config = self._load_config(config_path)
         self.device = self._setup_device()
         self.visualizer = PerformanceVisualizer(save_dir="results/model_evaluation")
-        self.image_viz = ImageVisualizer(save_dir="results/sample_predictions")
+        # self.image_viz = ImageVisualizer(save_dir="results/sample_predictions")
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load and validate configuration from YAML file."""
@@ -164,30 +164,31 @@ class ChestXRayTrainer:
     def train(self) -> str:
         """Execute the training pipeline."""
         try:
+            # Instantiate the model
             model = self._instantiate_class(self.config["model"])
-            datamodule = self._instantiate_class(self.config["data"])
 
-            # Setup data for all stages
-            datamodule.setup(stage="fit")
-            datamodule.setup(stage="test")
+            # Instantiate dataloaders for train and val splits
+            train_dataloader = self._instantiate_class(self.config["data"]["train"])
+            val_dataloader = self._instantiate_class(self.config["data"]["val"])
 
+            # Setup trainer
             trainer = self._setup_trainer()
+
+            # Start training
             logger.info("Starting model training...")
+            trainer.fit(
+                model,
+                train_dataloaders=train_dataloader,
+                val_dataloaders=val_dataloader,
+            )
 
-            # After instantiating datamodule
-            print(f"DEBUG: DataModule data_dir is {datamodule.data_dir}")
+            # Optionally run test set evaluation
+            if "test" in self.config["data"]:
+                logger.info("Running evaluation on test set...")
+                test_dataloader = self._instantiate_class(self.config["data"]["test"])
+                trainer.test(model, dataloaders=test_dataloader)
 
-            trainer.fit(model, datamodule)
-
-            logger.info("Training completed. Running evaluation...")
-            metrics = self.evaluate_model(model, datamodule.test_dataloader())
-
-            logger.info("Test Results:")
-            logger.info(f"Metrics: {metrics}")
-
-            ckpt_path = trainer.checkpoint_callback.best_model_path
-            logger.info(f"Best model saved to {ckpt_path}")
-            return ckpt_path
+            return trainer.checkpoint_callback.best_model_path
 
         except Exception as e:
             logger.error(f"Training failed: {str(e)}")

@@ -1,8 +1,9 @@
 """NIH Chest X-ray Dataset Implementation.
 
-This module provides dataset and datamodule implementations for the NIH Chest X-ray
-dataset, supporting training, validation and test splits with appropriate transforms.
-The implementation includes proper handling of multi-label classification data,
+This module provides dataset and datamodule implementations
+for the NIH Chest X-ray dataset, supporting training, validation
+and test splits with appropriate transforms. The implementation
+includes proper handling of multi-label classification data,
 configurable preprocessing, and weighted sampling for class imbalance.
 """
 

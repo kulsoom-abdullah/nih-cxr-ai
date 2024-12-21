@@ -1,9 +1,10 @@
 # src/nih_cxr_ai/data/data_validation.py
 """Data validation module for the NIH Chest X-ray dataset.
 
-This module provides validation and statistical analysis capabilities for verifying
-dataset integrity and generating summary statistics. Includes functions for checking
-image corruption, label consistency, and generating validation reports.
+This module provides validation & statistical analysis capabilities
+for verifying dataset integrity & generating summary statistics.
+Includes functions for checking image corruption, label consistency,
+and generating validation reports.
 """
 
 # Standard library imports
@@ -79,6 +80,7 @@ class NIHDataValidator:
                         with Image.open(img_path) as img:
                             img.verify()
                     except Exception as e:
+                        print(f"Exception {e}")
                         corrupted_files.append(str(img_path))
 
             return {
